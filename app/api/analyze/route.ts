@@ -17,10 +17,18 @@ import {
 import { auditLogger } from '../../../lib/auditLogger';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60; // Extend timeout to 60 seconds
 
 export async function POST(request: NextRequest) {
   const requestId = generateSecureToken();
   let validation: any = null;
+  
+  // Set timeout to prevent hanging
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error('Analysis timed out. Please try again with a smaller email file.'));
+    }, 55000); // 55 second timeout (leaves buffer for cleanup)
+  });
   
   try {
     // Validate Content-Type
@@ -131,22 +139,31 @@ export async function POST(request: NextRequest) {
       return createSecureErrorResponse('Invalid EML file format', 400, validation.fingerprint);
     }
 
-    // Perform analysis
-    const result = await analyzeEmailServer(emlContent, apiKey);
+    // Perform analysis with timeout
+    const analysisPromise = analyzeEmailServer(emlContent, apiKey);
+    const result = await Promise.race([
+      analysisPromise,
+      timeoutPromise
+    ]);
+    
+    // Type guard to ensure result is valid before using
+    if (typeof result !== 'object' || result === null || !('indicators' in result)) {
+      throw new Error('Invalid analysis result structure');
+    }
     
     auditLogger.logApiRequest('ANALYSIS_COMPLETED', {
       requestId,
       fingerprint: validation.fingerprint,
       emlSize: emlContent.length,
       hasIndicators: !!result.indicators,
-      riskLevel: result.riskLevel,
+      riskLevel: (result as any).riskLevel,
     });
 
     return createSecureResponse({
-      ...result,
+      ...(result as any),
       requestId,
       timestamp: new Date().toISOString(),
-      analysisTime: result.analysisTime || 0, // Include timing in response
+      analysisTime: (result as any).analysisTime || 0, // Include timing in response
     });
 
   } catch (error) {
@@ -159,8 +176,17 @@ export async function POST(request: NextRequest) {
       stack: error instanceof Error ? error.stack : undefined,
     }, 'ERROR');
 
-    // Prevent information leakage - return generic error message
-    return createSecureErrorResponse('Analysis failed. Please try again later.', 500, validation?.fingerprint);
+    // Provide specific error for timeout
+    if (message.includes('timeout')) {
+      return createSecureErrorResponse('Analysis timed out. Please try again with a smaller email file or wait a moment.', 503, validation?.fingerprint);
+    }
+
+    // Prevent information leakage for sensitive errors
+    const userMessage = message.includes('API key') || message.includes('quota') || message.includes('rate limit') 
+      ? message 
+      : 'Analysis failed. Please try again later.';
+
+    return createSecureErrorResponse(userMessage, 500, validation?.fingerprint);
   }
 }
 
