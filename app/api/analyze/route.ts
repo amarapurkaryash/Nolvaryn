@@ -17,7 +17,6 @@ import {
 import { auditLogger } from '../../../lib/auditLogger';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // Extend timeout to 60 seconds
 
 export async function POST(request: NextRequest) {
   const requestId = generateSecureToken();
