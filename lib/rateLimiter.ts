@@ -7,14 +7,18 @@ interface RateLimitEntry {
 // In-memory store (works for Vercel serverless)
 const rateLimitStore = new Map<string, RateLimitEntry>();
 
+// Get rate limit configuration from environment variables with fallbacks
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000; // Default: 15 minutes
+const RATE_LIMIT_MAX_REQUESTS = Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 10; // Default: 10 requests
+
 export const rateLimiter = {
-  checkLimit: (fingerprint: string, maxRequests: number = 10): {
+  checkLimit: (fingerprint: string, maxRequests: number = RATE_LIMIT_MAX_REQUESTS): {
     allowed: boolean;
     remaining: number;
     resetTime: number;
   } => {
     const now = Date.now();
-    const windowMs = 15 * 60 * 1000; // 15 minutes
+    const windowMs = RATE_LIMIT_WINDOW_MS;
     const entry = rateLimitStore.get(fingerprint);
     
     if (!entry || now > entry.resetTime) {
